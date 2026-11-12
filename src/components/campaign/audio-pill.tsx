@@ -102,6 +102,7 @@ export function AudioPill({ src, label, duration }: { src: string; label: string
       <audio
         ref={audio}
         preload="none"
+        playsInline
         src={src}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}

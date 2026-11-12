@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { db, newId, logEvent } from "@/lib/db";
 import { designCampaign, llmConfigured, DESIGN_MODEL } from "@/lib/ai";
 import { ownerCookie } from "@/lib/session";
+import { rateLimit, tooManyRequests } from "@/lib/ratelimit";
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as {
@@ -24,8 +25,15 @@ export async function POST(req: Request) {
   if (budgetCents < 100 || budgetCents > 1_000_000) {
     return NextResponse.json({ error: "Budget must be between $1 and $10,000 (sandbox)." }, { status: 400 });
   }
+  const clipCost = (p: number) => p + Math.round((p * 1000) / 10000);
+  if (body.priceCents && body.priceCents >= 5 && clipCost(Math.round(body.priceCents)) > budgetCents) {
+    return NextResponse.json({ error: "Budget must cover at least one clip at this price." }, { status: 400 });
+  }
   if (!llmConfigured()) {
     return NextResponse.json({ error: "AI is not configured on this server (GROQ_API_KEY missing)." }, { status: 503 });
+  }
+  if (!rateLimit("campaigns", req, 5, 10 * 60_000)) {
+    return tooManyRequests("You've designed several campaigns in a row. Please wait a few minutes before designing another.");
   }
 
   let design;
@@ -36,15 +44,30 @@ export async function POST(req: Request) {
   }
 
   const priceCents = Math.round(body.priceCents && body.priceCents >= 5 ? body.priceCents : design.suggested_price_cents);
+  if (clipCost(priceCents) > budgetCents) {
+    return NextResponse.json({ error: "Budget must cover at least one clip at this price." }, { status: 400 });
+  }
   const id = newId("cmp");
   const ownerToken = crypto.randomBytes(18).toString("base64url");
   const d = db();
   d.exec("BEGIN");
   try {
     d.prepare(
-      `INSERT INTO campaigns (id, title, brief, language_code, language_name, funder_name, price_cents, budget_cents, owner_token, ai_rationale)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, design.title, brief, design.language_code, design.language_name, funderName, priceCents, budgetCents, ownerToken, design.rationale);
+      `INSERT INTO campaigns (id, title, brief, language_code, language_name, funder_name, price_cents, budget_cents, owner_token, ai_rationale, ai_suggested_price_cents)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      design.title,
+      brief,
+      design.language_code,
+      design.language_name,
+      funderName,
+      priceCents,
+      budgetCents,
+      ownerToken,
+      design.rationale,
+      Number.isFinite(design.suggested_price_cents) ? Math.round(design.suggested_price_cents) : null,
+    );
     design.prompts.forEach((p, i) => {
       d.prepare("INSERT INTO prompts (id, campaign_id, idx, text, gloss) VALUES (?, ?, ?, ?, ?)").run(newId("prm"), id, i, p.text, p.gloss);
     });

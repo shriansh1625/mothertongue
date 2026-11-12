@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
-const g = globalThis as unknown as { __mtdb?: DatabaseSync };
+const g = globalThis as unknown as { __mtdb?: DatabaseSync; __mtmigrated?: number };
+const MIGRATION_VERSION = 1;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS campaigns (
@@ -107,6 +108,14 @@ export function db(): DatabaseSync {
     d.exec(SCHEMA);
     g.__mtdb = d;
   }
+  // idempotent migrations (also run when the cached connection survives a hot reload)
+  if (g.__mtmigrated !== MIGRATION_VERSION) {
+    const cols = g.__mtdb.prepare("PRAGMA table_info(campaigns)").all() as { name: string }[];
+    if (!cols.some((c) => c.name === "ai_suggested_price_cents")) {
+      g.__mtdb.exec("ALTER TABLE campaigns ADD COLUMN ai_suggested_price_cents INTEGER");
+    }
+    g.__mtmigrated = MIGRATION_VERSION;
+  }
   return g.__mtdb;
 }
 
@@ -139,9 +148,10 @@ export type Campaign = {
   price_cents: number;
   budget_cents: number;
   fee_bps: number;
-  status: "draft" | "live" | "closed";
+  status: "draft" | "live" | "closing" | "closed";
   owner_token: string;
   ai_rationale: string | null;
+  ai_suggested_price_cents: number | null;
   paypal_order_id: string | null;
   paypal_capture_id: string | null;
   funded_cents: number;
@@ -203,24 +213,73 @@ export function clipCostCents(c: Pick<Campaign, "price_cents" | "fee_bps">): num
   return c.price_cents + Math.round((c.price_cents * c.fee_bps) / 10000);
 }
 
-/** Budget committed so far = every accepted clip (paid or not) x clip cost. */
+/**
+ * Money still owed for this campaign.
+ * Committed = accepted clips that are paid or can still be paid, times (price + fee).
+ * Failed payouts and velocity holds (no payout item yet) are not committed, so closing
+ * refunds that money. This is the same number the close refund uses.
+ */
 export function campaignMoney(c: Campaign) {
   const row = db()
     .prepare(
-      "SELECT COUNT(*) AS accepted, SUM(CASE WHEN payout_status = 'paid' THEN price_cents ELSE 0 END) AS paid FROM clips WHERE campaign_id = ? AND verdict = 'accepted'",
+      `SELECT COUNT(*) AS accepted,
+              SUM(CASE WHEN NOT (payout_status = 'failed' OR (payout_status = 'held' AND payout_item_id IS NULL)) THEN 1 ELSE 0 END) AS payable,
+              SUM(CASE WHEN payout_status = 'paid' THEN price_cents ELSE 0 END) AS paid
+       FROM clips WHERE campaign_id = ? AND verdict = 'accepted'`,
     )
-    .get(c.id) as { accepted: number; paid: number | null };
+    .get(c.id) as { accepted: number; payable: number | null; paid: number | null };
   const cost = clipCostCents(c);
-  const committed = row.accepted * cost;
+  const payable = Number(row.payable ?? 0);
+  const committed = payable * cost;
   const remaining = Math.max(0, c.funded_cents - committed - c.refunded_cents);
   return {
     accepted: row.accepted,
-    paidToSpeakers: row.paid ?? 0,
+    payable,
+    paidToSpeakers: Number(row.paid ?? 0),
     committed,
     remaining,
     clipsLeft: cost > 0 ? Math.floor(remaining / cost) : 0,
     cost,
   };
+}
+
+/** Audio types we accept and serve. Anything else is refused, never stored or returned as text/html. */
+export const AUDIO_MIME_ALLOW = ["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav", "audio/x-wav"] as const;
+
+export function acceptedAudioMime(m: string | null | undefined): string | null {
+  const base = (m || "").split(";")[0].trim().toLowerCase();
+  return (AUDIO_MIME_ALLOW as readonly string[]).includes(base) ? base : null;
+}
+
+/** Serve-time fallback. Unknown stored types become audio/webm so a browser will not execute them. */
+export function safeAudioMime(m: string | null | undefined): string {
+  return acceptedAudioMime(m) ?? "audio/webm";
+}
+
+/** Container magic bytes. Stops an HTML/SVG upload that only claims an audio content type. */
+export function looksLikeAudio(buf: Uint8Array, mime: string): boolean {
+  if (buf.byteLength < 12) return false;
+  const ascii = (i: number, s: string) => {
+    for (let n = 0; n < s.length; n++) if (buf[i + n] !== s.charCodeAt(n)) return false;
+    return true;
+  };
+  if (mime === "audio/webm") return buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3;
+  if (mime === "audio/ogg") return ascii(0, "OggS");
+  if (mime === "audio/wav" || mime === "audio/x-wav") return ascii(0, "RIFF") && ascii(8, "WAVE");
+  if (mime === "audio/mpeg") return ascii(0, "ID3") || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0);
+  if (mime === "audio/mp4") {
+    for (let i = 0; i + 4 <= Math.min(buf.byteLength, 64); i++) if (ascii(i, "ftyp")) return true;
+    return false;
+  }
+  return false;
+}
+
+/** Cap stored audio so a flood of clips cannot fill the disk. Duplicates store no bytes. */
+export const MAX_STORED_AUDIO_BYTES = 250 * 1024 * 1024;
+
+export function storedAudioBytes(): number {
+  const row = db().prepare("SELECT COALESCE(SUM(length(audio)), 0) AS n FROM clips").get() as { n: number };
+  return Number(row.n) || 0;
 }
 
 export function usd(cents: number): string {

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db, getCampaign, getPrompts, campaignMoney, usd, CLIP_COLS, type ClipRow } from "@/lib/db";
 import { isOwner } from "@/lib/session";
-import { FundButton, PostButton } from "@/components/actions";
+import { AutoRefresh, FundButton, PostButton } from "@/components/actions";
 import { PAYPAL_WEB } from "@/lib/paypal";
 import { BlurryGradient, CircleScatter } from "@/components/backgrounds";
 import { BlurText, NumberTicker, ProgressBar, Reveal } from "@/components/motion/primitives";
@@ -73,11 +73,24 @@ export default async function CampaignPage(props: PageProps<"/campaigns/[id]">) 
   ];
   const sandbox = PAYPAL_WEB.includes("sandbox");
   const status = campaign.status;
+  // "closing" is transient during closeCampaign and renders like "closed"
+  const ended = status === "closed" || status === "closing";
+  // keep the funder view current while clips can still arrive or a payout batch is still in flight
+  const watch = status === "live" || status === "closing" || payouts.some((p) => payoutTone(p.status).pulse);
+  const refundedRaw = sp.refunded === undefined ? null : Number(Array.isArray(sp.refunded) ? sp.refunded[0] : sp.refunded);
+  const refunded = refundedRaw !== null && Number.isFinite(refundedRaw) && refundedRaw >= 0 ? refundedRaw : null;
+  const aiPrice = campaign.ai_suggested_price_cents ?? null;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-5 sm:py-10 lg:space-y-8">
-      {(sp.funded || sp.cancelled || sp.error) && (
+      {watch && <AutoRefresh seconds={6} />}
+      {(sp.funded || sp.cancelled || sp.error || refunded !== null) && (
         <div className="space-y-3">
+          {refunded !== null && (
+            <FlashBanner tone="ok" title="Campaign closed" celebrate={refunded > 0}>
+              {refunded > 0 ? `Refunded ${usd(refunded)} to your PayPal.` : "Nothing left to refund."}
+            </FlashBanner>
+          )}
           {sp.funded && (
             <FlashBanner tone="ok" title="Funded through PayPal" celebrate>
               Your campaign is live and speakers can start recording.
@@ -132,7 +145,7 @@ export default async function CampaignPage(props: PageProps<"/campaigns/[id]">) 
               <Stat label="Sentences" sub="AI-designed prompts">
                 <NumberTicker value={prompts.length} />
               </Stat>
-              <Stat label="Verified clips" sub={status === "closed" ? "campaign closed" : `${money.clipsLeft} more fundable`}>
+              <Stat label="Verified clips" sub={ended ? "campaign closed" : `${money.clipsLeft} more fundable`}>
                 <NumberTicker value={money.accepted} />
               </Stat>
             </dl>
@@ -149,6 +162,11 @@ export default async function CampaignPage(props: PageProps<"/campaigns/[id]">) 
                   AI design notes · gpt-oss-120b
                 </p>
                 <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-ink/85">{campaign.ai_rationale}</p>
+                {typeof aiPrice === "number" && aiPrice > 0 && (
+                  <p className="mt-2 text-xs font-medium text-accent-ink">
+                    AI suggested {usd(aiPrice)} per clip · you set {usd(campaign.price_cents)}
+                  </p>
+                )}
               </aside>
             </Reveal>
           )}
@@ -172,7 +190,9 @@ export default async function CampaignPage(props: PageProps<"/campaigns/[id]">) 
               <NumberTicker value={money.remaining / 100} decimals={2} prefix="$" />
             </p>
             <p className="mt-1.5 text-sm text-muted">
-              {status === "closed"
+              {status === "closing"
+                ? "Closing · settling speakers and refunding unused budget"
+                : status === "closed"
                 ? "Campaign closed · no new clips accepted"
                 : status === "draft" && money.cost > 0
                   ? `Up to ${Math.floor(campaign.budget_cents / money.cost)} clips at ${usd(money.cost)} each once funded`
@@ -201,7 +221,7 @@ export default async function CampaignPage(props: PageProps<"/campaigns/[id]">) 
             <MoneyRow label="Funded via PayPal" cents={campaign.funded_cents}>
               {campaign.paypal_capture_id && <CopyChip label="capture" value={campaign.paypal_capture_id} />}
             </MoneyRow>
-            <MoneyRow label="Committed to verified clips" cents={money.committed} hint={`${money.accepted} ${money.accepted === 1 ? "clip" : "clips"} × ${usd(money.cost)}`} />
+            <MoneyRow label="Committed to verified clips" cents={money.committed} hint={`${money.payable} ${money.payable === 1 ? "clip" : "clips"} × ${usd(money.cost)}`} />
             <MoneyRow label="Paid to speakers" cents={money.paidToSpeakers} tone="ok" />
             {campaign.refunded_cents > 0 && (
               <MoneyRow label="Refunded to funder" cents={campaign.refunded_cents} tone="ppblue">
@@ -243,7 +263,7 @@ export default async function CampaignPage(props: PageProps<"/campaigns/[id]">) 
                 )}
               </div>
             )}
-            {owner && status === "live" && (
+            {owner && (status === "live" || status === "closing") && (
               <div className="space-y-2.5 rounded-2xl border border-line bg-paper-2/50 p-3">
                 <p className="px-1 text-xs font-semibold uppercase tracking-wider text-muted">Funder controls</p>
                 <PostButton
@@ -259,9 +279,10 @@ export default async function CampaignPage(props: PageProps<"/campaigns/[id]">) 
                 />
                 <PostButton
                   url={`/api/campaigns/${id}/close`}
-                  label="Close campaign & refund unused budget"
+                  label={status === "closing" ? "Finish closing & refund" : "Close campaign & refund unused budget"}
                   busyLabel="Settling and refunding…"
                   confirm="Close this campaign? Speakers are paid for verified clips, then the unused budget is refunded to your PayPal."
+                  redirectTo={`/campaigns/${id}?refunded={refundedCents}`}
                   className="btn btn-ghost w-full text-sm"
                   icon={<LockIcon />}
                 />
@@ -423,7 +444,7 @@ export default async function CampaignPage(props: PageProps<"/campaigns/[id]">) 
   );
 }
 
-function StatusPill({ status }: { status: "draft" | "live" | "closed" }) {
+function StatusPill({ status }: { status: "draft" | "live" | "closing" | "closed" }) {
   if (status === "live") {
     return (
       <span className="pill border-ok/20 bg-ok/10 text-ok">
@@ -432,6 +453,14 @@ function StatusPill({ status }: { status: "draft" | "live" | "closed" }) {
           <span className="relative inline-flex size-2 rounded-full bg-ok" />
         </span>
         live
+      </span>
+    );
+  }
+  if (status === "closing") {
+    return (
+      <span className="pill border-line bg-paper-2 text-muted">
+        <LockIcon />
+        Closing…
       </span>
     );
   }
@@ -490,6 +519,6 @@ function payoutTone(status: string): { color: string; pulse: boolean } {
   const s = status.toUpperCase();
   if (["SUCCESS", "COMPLETED", "PAID"].some((k) => s.includes(k))) return { color: "var(--ok)", pulse: false };
   if (["FAIL", "DENIED", "CANCEL", "RETURNED", "BLOCKED", "REFUSED"].some((k) => s.includes(k))) return { color: "var(--bad)", pulse: false };
-  if (["UNCLAIMED", "HELD", "ONHOLD"].some((k) => s.includes(k))) return { color: "var(--warn)", pulse: false };
+  if (["UNCLAIMED", "HELD", "ONHOLD", "UNKNOWN"].some((k) => s.includes(k))) return { color: "var(--warn)", pulse: false };
   return { color: "var(--pp-blue)", pulse: true };
 }

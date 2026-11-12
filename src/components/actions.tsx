@@ -63,6 +63,14 @@ function Swap({ busy, idle, working }: { busy: boolean; idle: ReactNode; working
 export function FundButton({ campaignId, label }: { campaignId: string; label: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // back/forward cache restore after the PayPal redirect would otherwise show a frozen "Opening PayPal…"
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setBusy(false);
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, []);
   return (
     <div className="space-y-2">
       <motion.button
@@ -76,14 +84,18 @@ export function FundButton({ campaignId, label }: { campaignId: string; label: s
         onClick={async () => {
           setBusy(true);
           setError(null);
-          const res = await fetch(`/api/campaigns/${campaignId}/fund`, { method: "POST" });
-          const j = await res.json();
-          if (!res.ok) {
-            setError(j.error || "Could not start PayPal checkout");
-            setBusy(false);
-            return;
+          let redirecting = false;
+          try {
+            const res = await fetch(`/api/campaigns/${campaignId}/fund`, { method: "POST" });
+            const j = await res.json().catch(() => ({}));
+            if (!res.ok || !j.approveUrl) throw new Error(j.error || "Could not start PayPal checkout");
+            redirecting = true;
+            window.location.href = j.approveUrl;
+          } catch (e) {
+            setError((e as Error).message || "Could not start PayPal checkout");
+          } finally {
+            if (!redirecting) setBusy(false);
           }
-          window.location.href = j.approveUrl;
         }}
       >
         <Swap
@@ -120,6 +132,7 @@ export function PostButton({
   confirm: confirmText,
   className = "btn btn-ghost",
   icon,
+  redirectTo,
 }: {
   url: string;
   label: string;
@@ -128,6 +141,8 @@ export function PostButton({
   className?: string;
   /** Optional leading icon (visual only). */
   icon?: ReactNode;
+  /** Optional URL template to navigate to on success; "{refundedCents}" is filled from the JSON response. */
+  redirectTo?: string;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -150,7 +165,8 @@ export function PostButton({
             const j = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(j.error || "Request failed");
             setMsg({ ok: true, n: Date.now(), text: j.message || (j.refundedCents !== undefined ? `Refunded $${(j.refundedCents / 100).toFixed(2)} via PayPal.` : "Done.") });
-            router.refresh();
+            if (redirectTo) router.push(redirectTo.replace("{refundedCents}", encodeURIComponent(String(j.refundedCents ?? 0))));
+            else router.refresh();
           } catch (e) {
             setMsg({ ok: false, n: Date.now(), text: (e as Error).message });
           } finally {

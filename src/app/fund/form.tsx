@@ -55,10 +55,15 @@ export function CreateCampaignForm({ explainer }: { explainer?: ReactNode }) {
   const budgetCents = Math.round(parseFloat(budget || "0") * 100);
   const costPerClip = Math.round(priceCents * 1.1);
   const maxClips = costPerClip > 0 ? Math.floor(budgetCents / costPerClip) : 0;
+  // a budget that can't pay for even one clip would create a funded campaign that rejects every recording
+  const cantCover = !(Number.isFinite(maxClips) && maxClips >= 1);
+  const coverHint = !(priceCents > 0)
+    ? "Set a pay per clip to continue."
+    : `Budget must cover at least one clip at this price (${Number.isFinite(costPerClip) ? `$${(costPerClip / 100).toFixed(2)}` : "-"} incl. fee).`;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (busy) return;
+    if (busy || cantCover) return;
     setBusy(true);
     setError(null);
     // Bring the card's top (where the AI loading state lives) into view, e.g. after submitting from the bottom on mobile.
@@ -70,7 +75,7 @@ export function CreateCampaignForm({ explainer }: { explainer?: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ funderName, language, brief, count, priceCents, budgetCents }),
       });
-      const j = await res.json();
+      const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || "Something went wrong");
       router.push(`/campaigns/${j.id}`);
     } catch (err) {
@@ -207,12 +212,18 @@ export function CreateCampaignForm({ explainer }: { explainer?: ReactNode }) {
             <InlineAlert message={error} onDismiss={() => setError(null)} />
 
             <div className="flex flex-col-reverse items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-muted">No payment yet. You review the prompts before funding.</p>
+              {cantCover && !busy ? (
+                <p className="text-xs text-warn" role="status">
+                  {coverHint}
+                </p>
+              ) : (
+                <p className="text-xs text-muted">No payment yet. You review the prompts before funding.</p>
+              )}
               <motion.button
                 className="btn btn-primary shimmer group w-full shrink-0 whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-[#fffdf9] sm:w-auto"
-                disabled={busy}
-                whileHover={busy ? undefined : { y: -1 }}
-                whileTap={busy ? undefined : { scale: 0.97 }}
+                disabled={busy || cantCover}
+                whileHover={busy || cantCover ? undefined : { y: -1 }}
+                whileTap={busy || cantCover ? undefined : { scale: 0.97 }}
                 transition={{ type: "spring", stiffness: 400, damping: 25 }}
               >
                 {busy ? (

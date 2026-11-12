@@ -3,16 +3,27 @@ import { db, getCampaign, logEvent, type Prompt } from "@/lib/db";
 import { processClip, ClipRejected } from "@/lib/judge";
 import { settleCampaign, speakerUnpaidCents } from "@/lib/settle";
 import { currentContributor } from "@/lib/session";
+import { rateLimit, tooManyRequests } from "@/lib/ratelimit";
+
+const MAX_BODY_BYTES = 7_000_000;
 
 export async function POST(req: Request) {
   const contributor = await currentContributor();
   if (!contributor) return NextResponse.json({ error: "Join as a speaker first." }, { status: 401 });
+
+  // reject oversized bodies before buffering them (content-length can be omitted, so the blob size is checked too)
+  const len = Number(req.headers.get("content-length") || 0);
+  if (len > MAX_BODY_BYTES) return NextResponse.json({ error: "That recording is too long. Keep it under 20 seconds." }, { status: 413 });
+  if (!rateLimit("clips", req, 60, 10 * 60_000)) {
+    return tooManyRequests("You're recording very fast. Please take a short break and try again in a few minutes.");
+  }
 
   const form = await req.formData();
   const campaignId = String(form.get("campaignId") || "");
   const promptId = String(form.get("promptId") || "");
   const file = form.get("audio");
   if (!(file instanceof Blob)) return NextResponse.json({ error: "No audio received." }, { status: 400 });
+  if (file.size > MAX_BODY_BYTES) return NextResponse.json({ error: "That recording is too long. Keep it under 20 seconds." }, { status: 413 });
 
   const campaign = getCampaign(campaignId);
   if (!campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 });

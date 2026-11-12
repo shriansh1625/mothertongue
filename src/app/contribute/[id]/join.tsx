@@ -26,18 +26,23 @@ export function JoinForm() {
         e.preventDefault();
         setBusy(true);
         setError(null);
-        const res = await fetch("/api/contributors", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, email, uiLanguage, consent }),
-        });
-        const j = await res.json();
-        if (!res.ok) {
-          setError(j.error);
-          setBusy(false);
-          return;
+        let joined = false;
+        try {
+          const res = await fetch("/api/contributors", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, email, uiLanguage, consent }),
+          });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(j.error || "Could not join right now. Please try again.");
+          joined = true;
+          router.refresh();
+        } catch (err) {
+          setError((err as Error).message || "Could not join right now. Please try again.");
+        } finally {
+          // on success keep the busy state until the refreshed page swaps in the recorder
+          if (!joined) setBusy(false);
         }
-        router.refresh();
       }}
     >
       <div aria-hidden className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full bg-accent/10 blur-3xl" />

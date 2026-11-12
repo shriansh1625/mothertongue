@@ -1,10 +1,11 @@
-# Render Blueprint: New > Blueprint > pick this repo, then fill in the secret env vars.
+# Render Web Service. Free plan, no disk: creating this does not ask for a card.
+# Dashboard path if you are not using Blueprint: New → Web Service → this repo → Free.
+# Persistent disk (paid) is optional later: set DATA_DIR=/var/data and mount a disk there.
 services:
   - type: web
     name: mothertongue
     runtime: node
-    # starter (paid) keeps the service warm for judges and allows the persistent disk below
-    plan: starter
+    plan: free
     region: oregon
     buildCommand: npm ci && npm run build
     startCommand: npm start
@@ -14,7 +15,7 @@ services:
       - key: NODE_VERSION
         value: "22"
       - key: DATA_DIR
-        value: /var/data
+        value: ./data
       - key: PAYPAL_ENV
         value: sandbox
       - key: SETTLE_THRESHOLD_CENTS
@@ -33,7 +34,3 @@ services:
         sync: false
       - key: DEMO_BUYER_PASSWORD
         sync: false
-    disk:
-      name: mothertongue-data
-      mountPath: /var/data
-      sizeGB: 1

@@ -162,7 +162,8 @@ export async function refundCapture(captureId: string, amountCents: number, ref:
       amount: { currency_code: "USD", value: (amountCents / 100).toFixed(2) },
       note_to_payer: note.slice(0, 255),
     },
-    { requestId: `refund-${ref}-${amountCents}`, ref },
+    // Stable per campaign so a retry of the same close replays this refund instead of issuing another.
+    { requestId: `refund-${ref}`, ref },
   );
 }
 

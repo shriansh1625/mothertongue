@@ -74,22 +74,38 @@ export function Recorder(props: {
   const chunks = useRef<Blob[]>([]);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const secRef = useRef(0);
+  const startingRef = useRef(false);
+  const queuedRef = useRef(false);
   const meter = useMicMeter(32);
 
   const prompt = props.prompts[idx];
   const allDone = props.prompts.every((p) => done.has(p.id));
 
   const loadMine = useCallback(async () => {
-    const res = await fetch(`/api/me?campaign=${props.campaignId}`, { cache: "no-store" });
-    if (res.ok) setMine(await res.json());
+    try {
+      const res = await fetch(`/api/me?campaign=${props.campaignId}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const j = await res.json();
+      queuedRef.current = Array.isArray(j?.clips) && j.clips.some((c: MyClip) => c.verdict === "accepted" && c.payout_status === "queued");
+      setMine(j);
+    } catch {
+      // network blip: keep the last known state, the next poll will retry
+    }
   }, [props.campaignId]);
 
+  // setTimeout chain (not setInterval) so a slow response never stacks overlapping polls;
+  // poll faster only while a payout is in flight
   useEffect(() => {
-    const first = setTimeout(loadMine, 0);
-    const t = setInterval(loadMine, 4000);
+    let cancelled = false;
+    let t: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      await loadMine();
+      if (!cancelled) t = setTimeout(tick, queuedRef.current ? 4000 : 10000);
+    };
+    t = setTimeout(tick, 0);
     return () => {
-      clearTimeout(first);
-      clearInterval(t);
+      cancelled = true;
+      clearTimeout(t);
     };
   }, [loadMine]);
 
@@ -112,36 +128,55 @@ export function Recorder(props: {
   }
 
   async function start() {
+    // guard against double-click / Space+click starting two recorders
+    if (startingRef.current || recRef.current?.state === "recording") return;
+    startingRef.current = true;
     setError(null);
     setResult(null);
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const s = stream;
       const mime = pickMime();
       const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       chunks.current = [];
       rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
       rec.onstop = () => {
         meter.stop();
-        stream.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
+        s.getTracks().forEach((t) => t.stop());
+        if (streamRef.current === s) streamRef.current = null;
         upload(new Blob(chunks.current, { type: rec.mimeType || mime || "audio/webm" }));
       };
       rec.start();
       recRef.current = rec;
+      if (streamRef.current && streamRef.current !== stream) streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = stream;
       meter.start(stream); // live level meter taps the same stream MediaRecorder records
       secRef.current = 0;
       setSeconds(0);
       setState("recording");
+      if (timer.current) clearInterval(timer.current);
       timer.current = setInterval(() => {
         secRef.current += 1;
         setSeconds(secRef.current);
         if (secRef.current >= MAX_SECONDS) stop();
       }, 1000);
-    } catch {
+    } catch (e) {
       meter.stop();
-      setError("Microphone access was blocked. Allow the microphone in your browser and try again.");
+      // release the mic if we got it but MediaRecorder creation/start failed
+      stream?.getTracks().forEach((t) => t.stop());
+      if (stream && streamRef.current === stream) streamRef.current = null;
+      const name = (e as { name?: string } | null)?.name;
+      setError(
+        name === "NotAllowedError" || name === "SecurityError"
+          ? "Microphone access was blocked. Allow the microphone in your browser and try again."
+          : name === "NotFoundError"
+            ? "No microphone found. Plug one in or switch devices and try again."
+            : "Your browser can't record audio here. Try Chrome.",
+      );
       setState("error");
+    } finally {
+      startingRef.current = false;
     }
   }
 

@@ -2,7 +2,7 @@
  * Clip verification pipeline: deterministic checks -> Whisper -> Qwen3 judge (gpt-oss-20b fallback) -> guardrails.
  * The AI decides; the guardrails make sure money only moves when the signals agree.
  */
-import { db, newId, sha256, logEvent, campaignMoney, CLIP_COLS, type Campaign, type Prompt, type Contributor, type ClipRow } from "./db";
+import { db, newId, sha256, logEvent, campaignMoney, getCampaign, acceptedAudioMime, looksLikeAudio, storedAudioBytes, MAX_STORED_AUDIO_BYTES, CLIP_COLS, type Campaign, type Prompt, type Contributor, type ClipRow } from "./db";
 import { transcribe, judgeClip, llmConfigured } from "./ai";
 
 const PUNCT = /[।॥.,!?;:"'“”‘’()[\]{}\-–—…،؟。，！？]/g;
@@ -37,15 +37,34 @@ export type ClipResult = {
 
 export class ClipRejected extends Error {}
 
-export async function processClip(input: {
+type ClipInput = {
   campaign: Campaign;
   prompt: Prompt;
   contributor: Contributor;
   audio: Uint8Array;
   mime: string;
-}): Promise<ClipResult> {
-  const { campaign, prompt, contributor, audio, mime } = input;
+};
+
+// uploads currently being judged, keyed contributor:prompt (single Node process)
+const gInflight = globalThis as unknown as { __mtClipInflight?: Set<string> };
+
+export async function processClip(input: ClipInput): Promise<ClipResult> {
+  const inflight = (gInflight.__mtClipInflight ??= new Set<string>());
+  const key = `${input.contributor.id}:${input.prompt.id}`;
+  if (inflight.has(key)) throw new ClipRejected("Your last recording for this sentence is still being checked. Please wait a moment.");
+  inflight.add(key);
+  try {
+    return await processClipInner(input);
+  } finally {
+    inflight.delete(key);
+  }
+}
+
+async function processClipInner(input: ClipInput): Promise<ClipResult> {
+  const { campaign, prompt, contributor, audio } = input;
+  const mime = acceptedAudioMime(input.mime);
   if (campaign.status !== "live") throw new ClipRejected("This campaign is not accepting recordings.");
+  if (!mime || !looksLikeAudio(audio, mime)) throw new ClipRejected("That file isn't a valid audio recording.");
   if (audio.byteLength < 1500) throw new ClipRejected("That recording was empty. Please try again.");
   if (audio.byteLength > 6_000_000) throw new ClipRejected("That recording is too long. Keep it under 20 seconds.");
 
@@ -60,6 +79,9 @@ export async function processClip(input: {
 
   const hash = sha256(audio);
   const duplicate = d.prepare("SELECT id FROM clips WHERE campaign_id = ? AND sha256 = ?").get(campaign.id, hash);
+  if (!duplicate && storedAudioBytes() + audio.byteLength > MAX_STORED_AUDIO_BYTES) {
+    throw new ClipRejected("This demo is full of recordings right now. Please try again later.");
+  }
 
   let transcript = "";
   let detected: string | null = null;
@@ -125,7 +147,7 @@ export async function processClip(input: {
       } else {
         verdict = "review";
         reasons = ["unclear_speech"];
-        explanationEn = explanation = "Almost there. A reviewer will check this one.";
+        explanationEn = explanation = "Almost there. Please record it once more, a little more clearly.";
       }
     }
 
@@ -145,6 +167,26 @@ export async function processClip(input: {
       reasons = [...reasons, "guardrail:protect_speaker"];
     }
 
+    // ---- Re-check right before the INSERT (no await from here to the INSERT, so this is atomic in one process) ----
+    const fresh = getCampaign(campaign.id);
+    if (!fresh || fresh.status !== "live") throw new ClipRejected("This campaign is not accepting recordings.");
+    let storedAudio: Uint8Array = audio;
+    if (d.prepare("SELECT id FROM clips WHERE campaign_id = ? AND sha256 = ?").get(campaign.id, hash)) {
+      // the same bytes were stored while we were judging this one
+      verdict = "rejected";
+      reasons = [...reasons, "duplicate"];
+      explanation = explanationEn = "This exact audio file was already submitted. Please record a fresh take.";
+      storedAudio = new Uint8Array(0);
+    } else if (verdict === "accepted") {
+      if (d.prepare("SELECT id FROM clips WHERE contributor_id = ? AND prompt_id = ? AND verdict = 'accepted'").get(contributor.id, prompt.id)) {
+        throw new ClipRejected("You already have an accepted recording for this sentence.");
+      }
+      if (campaignMoney(fresh).clipsLeft <= 0) throw new ClipRejected("This campaign's budget is fully used. Thank you!");
+    }
+    if (storedAudio.byteLength > 0 && storedAudioBytes() + storedAudio.byteLength > MAX_STORED_AUDIO_BYTES) {
+      throw new ClipRejected("This demo is full of recordings right now. Please try again later.");
+    }
+
     logEvent("ai.judge", campaign.id, `${verdict.toUpperCase()} clip for "${prompt.text.slice(0, 40)}" (similarity ${match.toFixed(2)}, ${judge})`, {
       transcript,
       detected,
@@ -161,7 +203,7 @@ export async function processClip(input: {
       campaign.id,
       prompt.id,
       contributor.id,
-      audio,
+      storedAudio,
       mime,
       audio.byteLength,
       hash,
@@ -181,12 +223,12 @@ export async function processClip(input: {
     return { clip: getClip(id)!, autoSettle: verdict === "accepted" };
   }
 
-  // duplicate path: store for audit, no AI spend
+  // duplicate path: store metadata for audit (no audio bytes, so repeats can't fill the disk), no AI spend
   const id = newId("clip");
   d.prepare(
     `INSERT INTO clips (id, campaign_id, prompt_id, contributor_id, audio, mime, bytes, sha256, verdict, reasons, explanation, explanation_en, judge, price_cents)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-  ).run(id, campaign.id, prompt.id, contributor.id, audio, mime, audio.byteLength, hash, verdict, JSON.stringify(reasons), explanation, explanationEn, judge);
+  ).run(id, campaign.id, prompt.id, contributor.id, new Uint8Array(0), mime, audio.byteLength, hash, verdict, JSON.stringify(reasons), explanation, explanationEn, judge);
   logEvent("ai.judge", campaign.id, "REJECTED duplicate audio (no AI call needed)");
   return { clip: getClip(id)!, autoSettle: false };
 }

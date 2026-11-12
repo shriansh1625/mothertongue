@@ -6,7 +6,7 @@
  * reduced motion it starts paused on the finished pipeline.
  */
 import { animate, AnimatePresence, motion, MotionConfig, useInView, useMotionValue, useReducedMotion, useTransform } from "motion/react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { CoinBurst, WaveBars } from "@/components/motion/primitives";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -58,8 +58,12 @@ const LANGS: Lang[] = [
 const STEPS = ["Record", "Transcribe", "Verify", "Pay"] as const;
 const STEP_MS = [2800, 2600, 3000, 2800];
 
+const noopSubscribe = () => () => {};
+
 export function HeroDemo() {
-  const reduce = useReducedMotion() ?? false;
+  // useReducedMotion is null on the server; gate on mount so the first client render matches SSR
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  const reduce = (useReducedMotion() ?? false) && mounted;
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { margin: "-60px" });
   const [s, setS] = useState({ lang: 0, step: 0, burst: 0 });

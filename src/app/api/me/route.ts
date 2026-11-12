@@ -3,6 +3,9 @@ import { db } from "@/lib/db";
 import { currentContributor } from "@/lib/session";
 import { refreshPayout } from "@/lib/settle";
 
+const g = globalThis as unknown as { __mtLastRefresh?: Map<string, number> };
+const REFRESH_EVERY_MS = 20_000;
+
 /** Speaker's clips + payout status for one campaign (polled by the recorder). */
 export async function GET(req: Request) {
   const me = await currentContributor();
@@ -16,7 +19,11 @@ export async function GET(req: Request) {
       "SELECT DISTINCT payout_id FROM clips WHERE contributor_id = ? AND campaign_id = ? AND payout_status = 'queued' AND payout_id IS NOT NULL",
     )
     .all(me.id, campaignId) as { payout_id: string }[];
+  const lastRefresh = (g.__mtLastRefresh ??= new Map<string, number>());
   for (const p of pending.slice(0, 3)) {
+    const now = Date.now();
+    if (now - (lastRefresh.get(p.payout_id) ?? 0) <= REFRESH_EVERY_MS) continue;
+    lastRefresh.set(p.payout_id, now);
     try {
       await refreshPayout(p.payout_id);
     } catch {}
