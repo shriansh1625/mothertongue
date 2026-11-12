@@ -197,7 +197,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .blob-drift-1, .blob-drift-2, .blob-drift-3, .marquee-track, .shimmer::after { animation: none; }
+  .blob-drift-1, .blob-drift-2, .blob-drift-3, .marquee-track, .shimmer::after, .rise, .recording { animation: none; }
 }
 
 @keyframes rise {

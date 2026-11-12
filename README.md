@@ -25,10 +25,10 @@ Teams that need this data (health NGOs, universities, AI labs) hit two walls:
 
 | Step | Who | What happens | PayPal | AI |
 |---|---|---|---|---|
-| 1. Fund | NGO / lab / researcher | Describes the speech it needs. **Claude** writes native-script recording prompts and explains its design. The funder pays the budget at **PayPal Checkout**. | Orders v2 create → buyer approval → capture | Claude Opus 5.5 campaign designer |
+| 1. Fund | NGO / lab / researcher | Describes the speech it needs. An AI campaign designer writes native-script recording prompts, suggests a fair price per clip and explains its design. The funder pays the budget at **PayPal Checkout**. | Orders v2 create → buyer approval → capture | `openai/gpt-oss-120b` campaign designer |
 | 2. Record | Native speakers, anywhere | Reads sentences aloud in the browser, with no app to install. | | |
-| 3. Verify | AI judge + guardrails | **Whisper** transcribes and detects the language. **Claude** judges the clip against the expected sentence and writes feedback **in the speaker's own language**. Deterministic guardrails block payment whenever the AI and the signals disagree. | | Whisper large-v3-turbo + Claude Opus 5.5 |
-| 4. Pay | Settlement agent | Batches verified, unpaid clips and pays each speaker through **PayPal Payouts**. It writes a ledger note, applies velocity holds and enforces the budget. Webhooks confirm every item. | Payouts batch + item webhooks | Claude writes the settlement note |
+| 3. Verify | AI judge + guardrails | **Whisper** transcribes and detects the language. A multilingual **Qwen3** judge checks the clip against the expected sentence and writes feedback **in the speaker's own language**. Deterministic guardrails block payment whenever the AI and the signals disagree. | | `whisper-large-v3-turbo` + `qwen/qwen3.8-27b` (fallback `openai/gpt-oss-20b`) |
+| 4. Pay | Settlement agent | Batches verified, unpaid clips and pays each speaker through **PayPal Payouts**. It writes a ledger note, applies velocity holds and enforces the budget. Webhooks confirm every item. | Payouts batch + item webhooks | `openai/gpt-oss-120b` writes the ledger note and speaker thank-you |
 | 5. Refund | Funder | On close, any unused budget is **refunded automatically** through PayPal. The funder downloads a dataset manifest where each clip carries its PayPal payout ID as proof of payment. | Payments v2 refund | |
 
 > **Why AI is essential:** at $0.25 a clip, a human reviewer costs more than the clip. Automatic verification is what makes paying per clip, worldwide, viable.
@@ -66,19 +66,24 @@ Can't speak the campaign's language? Record yourself saying something else and w
 
 ## AI
 
-| Model | Role | What it decides | Where |
+All AI runs on **Groq** with a single `GROQ_API_KEY`. Every structured output is validated with **zod** before the app acts on it, and every model call is logged to the ledger.
+
+| Model (Groq) | Role | What it decides | Where |
 |---|---|---|---|
-| **Claude Opus 5.5** (`claude-opus-5-5`, Anthropic SDK, structured outputs) | Campaign designer | Turns a plain-language brief into native-script prompts, pricing advice and a design rationale | `designCampaign()` in `src/lib/ai.ts` |
-| **Claude Opus 5.5** | Clip judge | Accepted / rejected / needs review, with reason codes and feedback in the speaker's language. It knows to ignore ASR noise (script variants, diacritics). | `judgeClip()` in `src/lib/ai.ts` |
-| **Claude Opus 5.5** | Settlement reviewer | Writes the funder's ledger summary and the thank-you note inside each PayPal payout | `writeSettlementNote()` |
-| **Whisper large-v3-turbo** (Groq) | Speech-to-text + language ID | Transcript, detected language, no-speech probability, confidence | `transcribe()` |
+| **`whisper-large-v3-turbo`** | Speech-to-text + language ID | Transcript, detected language, duration, no-speech probability, average log-probability | `transcribe()` in `src/lib/ai.ts` |
+| **`openai/gpt-oss-120b`** (strict JSON-schema output) | Campaign designer | Turns a plain-language brief into native-script prompts with English glosses, a suggested price per clip (clamped to 10–100¢) and a design rationale | `designCampaign()` in `src/lib/ai.ts` |
+| **`qwen/qwen3.8-27b`** (JSON output, normalised, then zod-validated) | Clip judge | Accepted / rejected / review, with reason codes and feedback in the speaker's interface language plus English. Told to ignore ASR noise (script variants, diacritics, digits vs words). | `judgeClip()` in `src/lib/ai.ts`, called from `src/lib/judge.ts` |
+| **`openai/gpt-oss-20b`** (strict JSON-schema output) | Fallback judge | Takes over automatically if the Qwen call fails or returns invalid output | `judgeClip()` |
+| **`openai/gpt-oss-120b`** (strict JSON-schema output) | Settlement agent notes | Writes the funder's ledger summary for each payout batch and the thank-you note inside each PayPal payout | `writeSettlementNote()` in `src/lib/ai.ts`, called from `src/lib/settle.ts` |
+
+Each model can be swapped with an env var (see below). If both judges fail, a conservative rules-based judge (transcript similarity + no-speech signal) decides and the guardrails still apply. If the note writer fails, the payout goes out with a plain default note.
 
 ### Guardrails (money only moves when the evidence agrees)
 
 - Silence, empty transcripts or high no-speech probability are always rejected, whatever the AI says.
 - AI says *accepted* but similarity is under 20%: downgraded to **review** (`guardrail:ai_signal_disagreement`).
 - AI says *rejected* but similarity is 93% or more: upgraded to **review** (`guardrail:protect_speaker`).
-- Duplicate audio (SHA-256) and re-recording an already-paid sentence are blocked before any AI spend.
+- Duplicate audio (SHA-256) and re-recording a sentence the speaker already has accepted are blocked before any AI spend.
 - The settlement agent never pays beyond the funded budget, holds implausibly fast speakers for human review, and locks clips in a transaction so nothing is paid twice.
 
 ---
@@ -87,21 +92,21 @@ Can't speak the campaign's language? Record yourself saying something else and w
 
 ```
 Browser (Next.js 16 / React 19)
-  ├─ Funder: brief ──► /api/campaigns ──► Claude (design) ──► SQLite
+  ├─ Funder: brief ──► /api/campaigns ──► gpt-oss-120b (design) ──► SQLite
   │          fund  ──► /api/campaigns/:id/fund ──► PayPal Orders v2 ──► approve ──► /api/paypal/return ──► capture
-  ├─ Speaker: MediaRecorder ──► /api/clips ──► Whisper ──► Claude judge ──► guardrails ──► SQLite
-  │                                         └─(threshold)─► settlement agent ──► PayPal Payouts
+  ├─ Speaker: MediaRecorder ──► /api/clips ──► Whisper ──► Qwen3 judge (gpt-oss-20b fallback) ──► guardrails ──► SQLite
+  │                                         └─(threshold)─► settlement agent (gpt-oss-120b note) ──► PayPal Payouts
   └─ Funder: settle / close ──► Payouts batch / Payments v2 refund
 PayPal webhooks ──► /api/paypal/webhook (signature verified) ──► clip + payout status
 Everything ──► events table ──► /ledger
 ```
 
-- **Stack:** Next.js 16 (App Router, route handlers), TypeScript, Tailwind CSS 4, Node 22 built-in `node:sqlite` (no external DB), `@anthropic-ai/sdk`, zod
+- **Stack:** Next.js 16 (App Router, route handlers), React 19, TypeScript, Tailwind CSS 4, Motion, Node 22 built-in `node:sqlite` (no external DB), zod. Groq (OpenAI-compatible API) and PayPal REST are called directly with `fetch`, with no SDKs.
 - **Hosting:** Render web service with a 1 GB persistent disk (`render.yaml`)
 
 ## Run it locally
 
-Requirements: Node 22+, a PayPal developer account (sandbox), an Anthropic API key, and a Groq API key.
+Requirements: Node 22+, a PayPal developer account (sandbox) and one Groq API key (console.groq.com), which covers speech-to-text, the designer, the judge and the settlement notes.
 
 ```bash
 git clone https://github.com/shriansh1625/mothertongue && cd mothertongue
@@ -110,6 +115,8 @@ cp .env.example .env.local   # fill in the keys (see below)
 node --env-file=.env.local scripts/smoke.mjs you-personal@example.com   # optional: checks every credential
 npm run dev                  # http://localhost:3000
 ```
+
+The smoke test refuses to run against live PayPal. It checks the PayPal OAuth token and Payouts scope, creates a sandbox Orders v2 order, sends a $0.01 sandbox payout if you pass a sandbox personal email, confirms the Groq key, and sends a test chat request to both Groq LLMs (`openai/gpt-oss-120b` and `qwen/qwen3.8-27b`).
 
 PayPal sandbox setup (≈5 minutes):
 
@@ -120,12 +127,26 @@ PayPal sandbox setup (≈5 minutes):
 | Variable | Purpose |
 |---|---|
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Sandbox REST app |
-| `PAYPAL_WEBHOOK_ID` | Enables webhook signature verification |
-| `ANTHROPIC_API_KEY` | Claude (design, judging, settlement notes) |
-| `GROQ_API_KEY` | Whisper speech-to-text |
+| `PAYPAL_WEBHOOK_ID` | Optional. Enables webhook signature verification |
+| `PAYPAL_ENV` | `sandbox` (default; this submission runs on sandbox only) |
+| `GROQ_API_KEY` | All AI: Whisper speech-to-text, campaign designer, clip judge, settlement notes |
+| `GROQ_STT_MODEL` | Optional override, default `whisper-large-v3-turbo` |
+| `GROQ_DESIGN_MODEL` | Optional override for the designer and settlement notes, default `openai/gpt-oss-120b` |
+| `GROQ_JUDGE_MODEL` | Optional override, default `qwen/qwen3.8-27b` |
+| `GROQ_FALLBACK_JUDGE_MODEL` | Optional override, default `openai/gpt-oss-20b` |
 | `APP_BASE_URL` | Public URL used for the PayPal return/cancel URLs |
 | `DATA_DIR` | SQLite location (Render: `/var/data`) |
-| `SETTLE_THRESHOLD_CENTS` | Auto-pay a speaker once verified earnings reach this amount (default 100) |
+| `SETTLE_THRESHOLD_CENTS` | Auto-pay a speaker once verified, unpaid earnings reach this many cents (default 100, `0` = manual only) |
+
+On Render, `render.yaml` presets `NODE_VERSION`, `DATA_DIR`, `PAYPAL_ENV` and `SETTLE_THRESHOLD_CENTS`; you fill in the PayPal credentials, `GROQ_API_KEY` and `APP_BASE_URL`.
+
+## Design
+
+- **Warm "paper and ink" identity:** cream paper backgrounds, ink-dark text, a single vermilion accent, Fraunces serif headings and Geist body text. PayPal yellow is reserved for PayPal actions.
+- **Native scripts first:** recording prompts are shown in their own script (Devanagari and others) with the English gloss alongside.
+- **Motion:** animations built with [Motion](https://motion.dev) (`motion/react`): spring hover and tap feedback, scroll reveals, layout animations and `AnimatePresence` transitions.
+- **Generative backgrounds:** Haikei-style SVG scenes (blurry gradients, layered waves, blob scenes, circle scatter, grain) rendered as plain SVG on the server.
+- **Accessible:** visible focus rings, labelled controls, and `prefers-reduced-motion` support, so animations calm down for users who ask for less motion.
 
 ## Built during the hackathon
 

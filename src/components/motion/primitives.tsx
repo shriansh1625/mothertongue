@@ -104,10 +104,14 @@ export function NumberTicker({ value, decimals = 0, prefix = "", suffix = "", cl
   const inView = useInView(ref, { once: true, margin: "-40px" });
   const mv = useMotionValue(0);
   const spring = useSpring(mv, { damping: 40, stiffness: 120 });
-  const text = useTransform(spring, (v) => `${prefix}${v.toFixed(decimals)}${suffix}`);
+  const reduce = useReducedMotion();
+  // round first and add 0 so tiny spring overshoots never render as "-0.00"
+  const text = useTransform(spring, (v) => `${prefix}${(Math.round(v * 10 ** decimals) / 10 ** decimals + 0).toFixed(decimals)}${suffix}`);
   useEffect(() => {
-    if (inView) mv.set(value);
-  }, [inView, value, mv]);
+    if (!inView) return;
+    mv.set(value);
+    if (reduce) spring.jump(value);
+  }, [inView, value, mv, spring, reduce]);
   return (
     <motion.span ref={ref} className={`tabular-nums ${className ?? ""}`}>
       {text}
@@ -220,12 +224,12 @@ export function CoinBurst({ trigger, label }: { trigger: number; label: string }
 
 /** Animated progress bar; segments are fractions 0..1 stacked left to right. */
 export function ProgressBar({ segments, className = "" }: { segments: { value: number; color: string; label?: string }[]; className?: string }) {
-  let acc = 0;
+  const clamped = segments.map((s) => Math.max(0, Math.min(1, s.value)));
+  const lefts = clamped.map((_, i) => clamped.slice(0, i).reduce((a, b) => a + b, 0));
   return (
     <div className={`relative h-2.5 w-full overflow-hidden rounded-full bg-paper-2 ${className}`}>
       {segments.map((s, i) => {
-        const left = acc;
-        acc += Math.max(0, Math.min(1, s.value));
+        const left = lefts[i];
         return (
           <motion.div
             key={i}
