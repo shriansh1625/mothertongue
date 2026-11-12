@@ -1,0 +1,37 @@
+# Render Blueprint: New > Blueprint > pick this repo, then fill in the secret env vars.
+services:
+  - type: web
+    name: mothertongue
+    runtime: node
+    # starter (paid) keeps the service warm for judges and allows the persistent disk below
+    plan: starter
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: false
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATA_DIR
+        value: /var/data
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: SETTLE_THRESHOLD_CENTS
+        value: "100"
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+    disk:
+      name: mothertongue-data
+      mountPath: /var/data
+      sizeGB: 1
