@@ -393,10 +393,7 @@ export default function Home() {
               return (
                 <Reveal key={c.id} delay={(i % 3) * 0.06} className="h-full">
                   <Lift className="h-full">
-                    <Link
-                      href={`/contribute/${c.id}`}
-                      className="card flex h-full flex-col p-5 transition-shadow hover:shadow-[0_18px_40px_-22px_rgba(31,27,22,0.35)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                    >
+                    <article className="card flex h-full flex-col p-5 transition-shadow hover:shadow-[0_18px_40px_-22px_rgba(31,27,22,0.35)]">
                       <div className="flex items-center justify-between gap-2">
                         <p className="label">{c.language_name}</p>
                         <span className="pill bg-ok/10 text-ok">{usd(c.price_cents)} per clip</span>
@@ -417,8 +414,16 @@ export default function Home() {
                           </span>
                           <span>{m.clipsLeft} clips left</span>
                         </div>
+                        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm font-semibold">
+                          <Link href={`/contribute/${c.id}`} className="text-accent focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">
+                            Start recording →
+                          </Link>
+                          <Link href={`/campaigns/${c.id}`} className="text-ink underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink">
+                            Close & refund
+                          </Link>
+                        </div>
                       </div>
-                    </Link>
+                    </article>
                   </Lift>
                 </Reveal>
               );

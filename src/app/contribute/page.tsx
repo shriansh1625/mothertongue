@@ -72,10 +72,7 @@ export default function ContributePage() {
               return (
                 <StaggerItem key={c.id} className="h-full">
                   <Lift className="h-full">
-                    <Link
-                      href={`/contribute/${c.id}`}
-                      className="card group relative flex h-full flex-col overflow-hidden p-6 transition-shadow hover:shadow-[0_24px_50px_-28px_rgba(31,27,22,0.45)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/30"
-                    >
+                    <article className="card group relative flex h-full flex-col overflow-hidden p-6 transition-shadow hover:shadow-[0_24px_50px_-28px_rgba(31,27,22,0.45)]">
                       <div aria-hidden className="pointer-events-none absolute -right-12 -top-12 size-40 rounded-full bg-accent/10 opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-100" />
                       <div className="relative flex items-center justify-between gap-2">
                         <span className="pill border-line bg-paper-2">{c.language_name}</span>
@@ -101,14 +98,19 @@ export default function ContributePage() {
                             funded by <span className="text-ink">{c.funder_name}</span>
                           </span>
                         </div>
-                        <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-accent">
-                          Start recording
-                          <span aria-hidden className="transition-transform duration-300 group-hover:translate-x-1">
-                            →
-                          </span>
-                        </span>
+                        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+                          <Link href={`/contribute/${c.id}`} className="inline-flex items-center gap-1.5 text-sm font-semibold text-accent focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">
+                            Start recording
+                            <span aria-hidden className="transition-transform duration-300 group-hover:translate-x-1">
+                              →
+                            </span>
+                          </Link>
+                          <Link href={`/campaigns/${c.id}`} className="text-sm font-semibold text-ink underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink">
+                            Close campaign & refund
+                          </Link>
+                        </div>
                       </div>
-                    </Link>
+                    </article>
                   </Lift>
                 </StaggerItem>
               );

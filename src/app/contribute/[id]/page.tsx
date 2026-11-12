@@ -29,15 +29,23 @@ export default async function RecordPage(props: PageProps<"/contribute/[id]">) {
         <BlurryGradient intensity={0.75} />
       </div>
       <div className="relative mx-auto max-w-5xl px-5 py-10">
-        <Link
-          href="/contribute"
-          className="group inline-flex items-center gap-1.5 rounded-full text-sm text-muted transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink"
-        >
-          <span aria-hidden className="transition-transform group-hover:-translate-x-0.5">
-            ←
-          </span>{" "}
-          All campaigns
-        </Link>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Link
+            href="/contribute"
+            className="group inline-flex items-center gap-1.5 rounded-full text-sm text-muted transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink"
+          >
+            <span aria-hidden className="transition-transform group-hover:-translate-x-0.5">
+              ←
+            </span>{" "}
+            All campaigns
+          </Link>
+          <Link
+            href={`/campaigns/${id}`}
+            className="inline-flex items-center rounded-full text-sm font-semibold text-ink underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink"
+          >
+            Close campaign & refund
+          </Link>
+        </div>
         <Reveal y={10}>
           <div className="mt-5 flex flex-wrap items-center gap-2">
             <span className="pill border-line bg-paper-2">{campaign.language_name}</span>

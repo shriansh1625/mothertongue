@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { VerdictBadge, PayoutBadge } from "@/components/badges";
@@ -495,6 +496,9 @@ export function Recorder(props: {
             <p className="mt-3 text-xs text-muted">
               Verified clips are paid automatically through PayPal Payouts once you reach $1.00, or whenever the funder runs settlement.
             </p>
+            <Link href={`/campaigns/${props.campaignId}`} className="btn btn-ghost mt-4 w-full text-sm">
+              Close campaign & refund
+            </Link>
           </div>
 
           <div className="card p-6">
