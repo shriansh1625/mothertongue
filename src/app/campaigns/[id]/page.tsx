@@ -242,23 +242,18 @@ export default async function CampaignPage(props: PageProps<"/campaigns/[id]">) 
                   <div className="rounded-xl border border-ppblue/20 bg-ppblue/5 px-3 py-2.5 text-xs text-ink">
                     <p className="font-semibold text-ppblue">Sandbox checkout: no real money</p>
                     <p className="mt-1 text-muted">
-                      Real PayPal accounts and real cards don&apos;t work here. Log in with a PayPal <strong className="text-ink">sandbox</strong> buyer account
-                      {process.env.DEMO_BUYER_EMAIL ? (
-                        <>
-                          :{" "}
-                          <code className="rounded bg-paper-2 px-1 py-0.5 font-mono text-[11px] text-ink">{process.env.DEMO_BUYER_EMAIL}</code>
-                          {process.env.DEMO_BUYER_PASSWORD && (
-                            <>
-                              {" "}/{" "}
-                              <code className="rounded bg-paper-2 px-1 py-0.5 font-mono text-[11px] text-ink">{process.env.DEMO_BUYER_PASSWORD}</code>
-                            </>
-                          )}
-                        </>
-                      ) : (
-                        " (see the README)"
-                      )}
-                      .
+                      Real PayPal accounts and real cards don&apos;t work here. Log in with a PayPal <strong className="text-ink">sandbox</strong> buyer account.
                     </p>
+                    {process.env.DEMO_BUYER_EMAIL ? (
+                      <a
+                        href={`/api/demo-credentials?campaign=${encodeURIComponent(id)}`}
+                        className="btn btn-ghost mt-2.5 px-3 py-1.5 text-xs"
+                      >
+                        Click to download
+                      </a>
+                    ) : (
+                      <p className="mt-1 text-muted">The sandbox buyer login is in the README.</p>
+                    )}
                   </div>
                 )}
               </div>
