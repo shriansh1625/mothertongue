@@ -6,7 +6,7 @@ Built by **SynapSoul Labs** for the **PayPal AI Hackathon 2026** · PayPal **san
 
 | | |
 |---|---|
-| 🌐 Live demo | **https://REPLACE-WITH-RENDER-URL** |
+| 🌐 Live demo | **https://mothertongue-vs58.onrender.com** |
 | 🎬 Demo video (< 3 min) | **https://youtu.be/REPLACE** |
 | 🧪 Judge sandbox buyer | see [Judge quick test](#judge-quick-test-3-minutes) |
 
