@@ -63,7 +63,7 @@ export default async function CampaignPage(props: PageProps<"/campaigns/[id]">) 
           <p className="text-muted mt-2">{campaign.brief}</p>
           {campaign.ai_rationale && (
             <div className="mt-5 rounded-xl bg-paper-2 p-4 text-sm">
-              <p className="label">Claude&apos;s design notes</p>
+              <p className="label">AI design notes</p>
               <p className="mt-1">{campaign.ai_rationale}</p>
             </div>
           )}

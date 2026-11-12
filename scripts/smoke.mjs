@@ -1,5 +1,5 @@
 // PayPal sandbox + AI smoke test.  Usage:  node --env-file=.env.local scripts/smoke.mjs [payout-receiver@personal.example.com]
-// Verifies: OAuth token, Orders v2 create, Payouts (optional, sends $0.01 to a SANDBOX personal account), Groq Whisper key, Anthropic key.
+// Verifies: OAuth token, Orders v2 create, Payouts (optional, sends $0.01 to a SANDBOX personal account), Groq Whisper + both Groq LLMs.
 const BASE = process.env.PAYPAL_ENV === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
 if (process.env.PAYPAL_ENV === "live") {
   console.error("Refusing to run the smoke test against LIVE PayPal.");
@@ -53,15 +53,16 @@ async function main() {
     const g = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` } });
     g.ok ? ok("Groq key works (Whisper)") : bad(`Groq key failed (${g.status})`);
   } else bad("GROQ_API_KEY missing");
-  if (process.env.ANTHROPIC_API_KEY) {
-    try {
-      const { default: Anthropic } = await import("@anthropic-ai/sdk");
-      const model = await new Anthropic().models.retrieve("claude-opus-5-5");
-      ok(`Anthropic key works (${model.id} available)`);
-    } catch (e) {
-      bad(`Anthropic key check failed: ${String(e).slice(0, 200)}`);
+  if (process.env.GROQ_API_KEY) {
+    for (const model of ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"]) {
+      const c = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model, max_completion_tokens: 50, messages: [{ role: "user", content: "Reply with: ok" }] }),
+      });
+      c.ok ? ok(`Groq chat ${model}`) : bad(`Groq chat ${model} failed (${c.status})`);
     }
-  } else bad("ANTHROPIC_API_KEY missing");
+  }
 }
 main().catch((e) => {
   console.error(e);

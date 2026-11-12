@@ -131,7 +131,7 @@ export async function settleCampaign(campaignId: string, opts: { contributorId?:
   const clipCount = items.reduce((s, i) => s + i.clipIds.length, 0);
   const totalCents = items.reduce((s, i) => s + i.amountCents, 0);
 
-  // ---- Claude writes the ledger summary + speaker thank-you note ----
+  // ---- gpt-oss-120b writes the ledger summary + speaker thank-you note ----
   const note = await writeSettlementNote({
     campaignTitle: campaign.title,
     languageName: campaign.language_name,

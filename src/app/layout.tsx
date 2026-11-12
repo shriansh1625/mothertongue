@@ -43,7 +43,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               Built by <span className="font-semibold text-ink">SynapSoul Labs</span> for the PayPal AI Hackathon. Payments run in the
               PayPal sandbox.
             </p>
-            <p>Claude verifies the speech · PayPal moves the money · speakers keep the credit.</p>
+            <p>AI verifies the speech · PayPal moves the money · speakers keep the credit.</p>
           </div>
         </footer>
       </body>

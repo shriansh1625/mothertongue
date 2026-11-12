@@ -57,9 +57,9 @@ export default function Home() {
       <section className="mx-auto max-w-6xl px-5 py-8">
         <div className="grid md:grid-cols-4 gap-4">
           {[
-            ["1 · Fund", "A health NGO, university or AI lab describes the speech it needs. Claude writes native-script sentences, and the budget is paid with PayPal Checkout."],
+            ["1 · Fund", "A health NGO, university or AI lab describes the speech it needs. GPT-OSS 120B writes native-script sentences, and the budget is paid with PayPal Checkout."],
             ["2 · Record", "Native speakers read sentences aloud in the browser, from anywhere, in minutes."],
-            ["3 · Verify", "Whisper transcribes each clip, and Claude judges it against the sentence. Guardrails stop money moving when the signals disagree."],
+            ["3 · Verify", "Whisper transcribes each clip, and Qwen3 judges it against the sentence. Guardrails stop money moving when the signals disagree."],
             ["4 · Pay & refund", "The settlement agent pays speakers in batches via PayPal Payouts. When the campaign closes, the unused budget is refunded through PayPal automatically."],
           ].map(([t, b]) => (
             <div key={t} className="card p-5">

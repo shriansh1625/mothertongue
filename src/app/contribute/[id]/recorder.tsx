@@ -188,7 +188,7 @@ export function Recorder(props: {
               )}
               <p className="text-sm text-muted h-5">
                 {state === "recording" && "Recording… press stop when you finish the sentence"}
-                {state === "checking" && "Whisper is transcribing, then Claude checks the clip…"}
+                {state === "checking" && "Whisper is transcribing, then Qwen3 checks the clip…"}
                 {state === "idle" && "Tap record, read the sentence once, and tap stop."}
               </p>
             </div>

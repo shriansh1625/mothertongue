@@ -104,7 +104,7 @@ export function CreateCampaignForm() {
       </p>
       {error && <p className="text-sm text-bad">{error}</p>}
       <button className="btn btn-primary w-full sm:w-auto" disabled={busy}>
-        {busy ? "Claude is writing your prompts…" : "Design campaign with AI →"}
+        {busy ? "AI is writing your prompts…" : "Design campaign with AI →"}
       </button>
     </form>
   );

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { db, newId, logEvent } from "@/lib/db";
-import { designCampaign, claudeConfigured } from "@/lib/ai";
+import { designCampaign, llmConfigured, DESIGN_MODEL } from "@/lib/ai";
 import { ownerCookie } from "@/lib/session";
 
 export async function POST(req: Request) {
@@ -24,8 +24,8 @@ export async function POST(req: Request) {
   if (budgetCents < 100 || budgetCents > 1_000_000) {
     return NextResponse.json({ error: "Budget must be between $1 and $10,000 (sandbox)." }, { status: 400 });
   }
-  if (!claudeConfigured()) {
-    return NextResponse.json({ error: "AI is not configured on this server (ANTHROPIC_API_KEY missing)." }, { status: 503 });
+  if (!llmConfigured()) {
+    return NextResponse.json({ error: "AI is not configured on this server (GROQ_API_KEY missing)." }, { status: 503 });
   }
 
   let design;
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
     d.exec("ROLLBACK");
     throw e;
   }
-  logEvent("ai.design", id, `Claude designed "${design.title}": ${design.prompts.length} ${design.language_name} prompts, suggested ${design.suggested_price_cents}c/clip`);
+  logEvent("ai.design", id, `${DESIGN_MODEL} designed "${design.title}": ${design.prompts.length} ${design.language_name} prompts, suggested ${design.suggested_price_cents}c/clip`);
 
   const res = NextResponse.json({ id });
   res.cookies.set(ownerCookie(id), ownerToken, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 60 });

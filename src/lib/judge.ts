@@ -1,9 +1,9 @@
 /**
- * Clip verification pipeline: deterministic checks -> Whisper -> Claude judge -> guardrails.
+ * Clip verification pipeline: deterministic checks -> Whisper -> Qwen3 judge (gpt-oss-20b fallback) -> guardrails.
  * The AI decides; the guardrails make sure money only moves when the signals agree.
  */
 import { db, newId, sha256, logEvent, campaignMoney, CLIP_COLS, type Campaign, type Prompt, type Contributor, type ClipRow } from "./db";
-import { transcribe, judgeClip, claudeConfigured, CLAUDE_MODEL } from "./ai";
+import { transcribe, judgeClip, llmConfigured } from "./ai";
 
 const PUNCT = /[।॥.,!?;:"'“”‘’()[\]{}\-–—…،؟。，！？]/g;
 
@@ -86,8 +86,8 @@ export async function processClip(input: {
     logprob = stt.avgLogprob;
     const match = similarity(transcript, prompt.text);
 
-    let ai = null;
-    if (claudeConfigured()) {
+    let ai: Awaited<ReturnType<typeof judgeClip>> | null = null;
+    if (llmConfigured()) {
       try {
         ai = await judgeClip({
           languageName: campaign.language_name,
@@ -102,7 +102,7 @@ export async function processClip(input: {
           uiLanguage: contributor.ui_language,
         });
       } catch (e) {
-        logEvent("ai.claude", campaign.id, `clip.judge failed, using rules: ${(e as Error).message.slice(0, 200)}`);
+        logEvent("ai.llm", campaign.id, `clip judge failed, using rules: ${(e as Error).message.slice(0, 200)}`);
       }
     }
 
@@ -111,7 +111,7 @@ export async function processClip(input: {
       reasons = ai.reasons;
       explanation = ai.explanation_local;
       explanationEn = ai.explanation_en;
-      judge = CLAUDE_MODEL;
+      judge = ai.model;
     } else {
       judge = "rules";
       if (match >= 0.72 && (noSpeech ?? 0) < 0.6) {
